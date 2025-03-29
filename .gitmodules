@@ -1,6 +1,3 @@
 [submodule "3rd/googletest"]
 	path = 3rd/googletest
 	url = https://github.com/google/googletest.git
-[submodule "3rd/boost"]
-	path = 3rd/boost
-	url = https://github.com/boostorg/boost.git

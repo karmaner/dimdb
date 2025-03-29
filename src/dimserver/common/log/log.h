@@ -1,27 +1,21 @@
 #pragma once
 
 #include <string>
-#include <cstring>
-#include <sstream>
+#include <memory>
+#include <vector>
 #include <fstream>
+#include <sstream>
 #include <mutex>
-#include <map>
-#include <set>
-#include <functional>
-#include <iostream>
-#include <filesystem>
-#include <chrono>
 #include <thread>
-#include <boost/format.hpp>
-#include <cstdarg>
+#include <map>
+#include <functional>
+#include <ctime>
+#include <chrono>
+#include <iomanip>
 
 namespace common {
 
-#define MESSAGE_LENGTH  2048
-#define LINE_LENGTH     1024
-#define MAX_LINE        100000
-#define LOG_HEAD_LENGTH 2048
-
+// 定义日志等级
 enum class LogLevel {
   TRACE = 0,
   DEBUG,
@@ -31,224 +25,254 @@ enum class LogLevel {
   PANIC
 };
 
-static const char* LevelToString(LogLevel level) {
+// 将LogLevel转换为字符串
+inline const char* LogLevelToString(LogLevel level) {
   switch (level) {
-#define xx(name) case name: return #name;
-    xx(LogLevel::TRACE);
-    xx(LogLevel::DEBUG);
-    xx(LogLevel::INFO);
-    xx(LogLevel::WARN);
-    xx(LogLevel::ERROR);
-    xx(LogLevel::PANIC);
+#define xx(name) case LogLevel::name: return #name;
+    xx(TRACE)
+    xx(DEBUG)
+    xx(INFO)
+    xx(WARN)
+    xx(ERROR)
+    xx(PANIC)
 #undef xx
     default:
-      return "UNKNOWN";
+      return "UNKNOW";
   }
 }
 
+// 前向声明
+class Logger;
+
+// 日志事件类，用于封装日志信息
+class LogEvent {
+public:
+  LogEvent(std::shared_ptr<Logger> logger, 
+          LogLevel level, const char* file, int32_t line, const char* func);
+  
+  std::stringstream& getSS() { return m_ss; }
+  
+  std::string getTime() const { return m_time; }
+  std::string getFile() const { return m_file; }
+  int32_t getLine() const { return m_line; }
+  std::string getFunc() const { return m_func; }
+  uint64_t getPid() const { return m_pid; }
+  uint64_t getTid() const { return m_tid; }
+  intptr_t getCtx() const { return m_ctx(); }
+  LogLevel getLevel() const { return m_level; }
+  std::shared_ptr<Logger> getLogger() const { return m_logger; }
+  std::string getContent() const { return m_ss.str(); }
+
+private:
+  std::shared_ptr<Logger> m_logger;
+  LogLevel m_level;
+  std::string m_file;
+  int32_t m_line = 0;
+  std::string m_func;
+  uint64_t m_pid = 0;
+  uint64_t m_tid = 0;
+  std::function<intptr_t()> m_ctx = []() { return 0; };
+  std::string m_time;
+  std::stringstream m_ss;
+};
+
+// 日志格式化器
+class LogFormatter {
+public:
+  using ptr = std::shared_ptr<LogFormatter>;
+  /*
+  * @brief 日志格式化器
+  * @param pattern 日志格式化字符串
+  * 格式化字符串说明：
+  * %Y-%m-%d %H:%M:%S.%f 表示时间，格式为：2025-03-28 10:00:00.000
+  * pid:%P tid:%T ctx:%C %L: %F@%f:%l 表示日志信息，格式为：pid:123 tid:456 ctx:789 L:INFO F:main@log.cpp:123
+  * %m 表示日志内容
+  */
+  LogFormatter(const std::string& pattern = 
+          "[%Y-%m-%d %H:%M:%S.%f pid:%P tid:%T ctx:%C %L: %F@%f:%l] >> %m");
+  
+  std::string format(std::shared_ptr<LogEvent> event);
+
+private:
+  std::string m_pattern;
+};
+
+// 日志输出目标的基类
+class LogAppender {
+public:
+  using ptr = std::shared_ptr<LogAppender>;
+  
+  virtual ~LogAppender() {}
+  
+  virtual void log(std::shared_ptr<LogEvent> event) = 0;
+  
+  void setFormatter(LogFormatter::ptr formatter) { m_formatter = formatter; }
+  LogFormatter::ptr getFormatter() const { return m_formatter; }
+  
+  void setLevel(LogLevel level) { m_level = level; }
+  LogLevel getLevel() const { return m_level; }
+
+protected:
+  LogLevel m_level = LogLevel::INFO;
+  LogFormatter::ptr m_formatter;
+  std::mutex m_mutex;
+};
+
+// 控制台输出
+class StdoutLogAppender : public LogAppender {
+public:
+  using ptr = std::shared_ptr<StdoutLogAppender>;
+  
+  void log(std::shared_ptr<LogEvent> event) override;
+};
+
+// 文件日志输出
 enum class LogRotate {
   ROTATE_SIZE, // By MAX line
   ROTATE_TIME  // By Day
 };
 
-class Log {
+class FileLogAppender : public LogAppender {
 public:
-  Log(const std::string& filename, LogLevel level = LogLevel::INFO,
-      LogLevel console_level = LogLevel::WARN);
-  ~Log(void);
+  using ptr = std::shared_ptr<FileLogAppender>;
+  
+  FileLogAppender(const std::string& filename, 
+                  LogRotate rotate = LogRotate::ROTATE_TIME, 
+                  size_t max_size = 10 * 1024 * 1024); // 默认10MB
+  
+  void log(std::shared_ptr<LogEvent> event) override;
+  
+  bool reopen();
 
-  template <class T>
-  Log& operator<<(T message);
+  // 用于测试的时间注入功能
+  void setTestTime(time_t time) { m_testTime = time; }
+  time_t getTestTime() const { return m_testTime; }
+  bool isTestMode() const { return m_testMode; }
+  void setTestMode(bool mode) { m_testMode = mode; }
 
-  template <class T>
-  int panic(T message);
+private:
+  bool checkRotate();
+  void createNewFile();
 
-  template <class T>
-  int error(T message);
+private:
+  std::string m_filename;
+  std::ofstream m_filestream;
+  LogRotate m_rotate;
+  size_t m_maxSize;
+  size_t m_currentSize = 0;
+  time_t m_lastRotateTime = 0;
+  
+  // 用于测试的时间注入
+  bool m_testMode = false;
+  time_t m_testTime = 0;
+};
 
-  template <class T>
-  int warn(T message);
+// 日志器
+class Logger : public std::enable_shared_from_this<Logger> {
+public:
+  using ptr = std::shared_ptr<Logger>;
+  
+  Logger(const std::string& name = "system");
+  
+  void log(LogLevel level, const std::shared_ptr<LogEvent>& event);
+  
+  void addAppender(LogAppender::ptr appender);
+  void delAppender(LogAppender::ptr appender);
+  void clearAppenders();
+  
+  LogLevel getLevel() const { return m_level; }
+  void setLevel(LogLevel level) { m_level = level; }
 
-  template <class T>
-  int info(T message);
+  const std::string& getName() const { return m_name; }
+  
+  const std::vector<LogAppender::ptr>& getAppenders() const { return m_appenders; }
 
-  template <class T>
-  int debug(T message);
+private:
+  std::string m_name;
+  LogLevel m_level = LogLevel::INFO;
+  std::vector<LogAppender::ptr> m_appenders;
+  std::mutex m_mutex;
+};
 
-  template <class T>
-  int trace(T message);
+// 日志管理器，单例模式
+class LogManager {
+public:
+  static LogManager& getInstance() {
+    static LogManager instance;
+    return instance;
+  }
+  
+  Logger::ptr getLogger(const std::string& name);
+  Logger::ptr getRoot() const { return m_root; }
 
-  int output(const LogLevel level, const char* module, const char* prefix, const char* format, ...);
-
-  int set_console_level(const LogLevel console_level);
-  LogLevel get_console_level();
-
-  int set_log_level(const LogLevel log_level);
-  LogLevel get_log_level();
-
-  int set_rotate_type(LogRotate rotate_type);
-  LogRotate get_rotate_type();
-
-  void set_module(const std::string& modules);
-  bool check_output(const LogLevel log_level, const char* module);
-
-  void set_context(std::function<intptr_t()> context);
-  intptr_t context_id();
-
-  int rotate(const int year = 0, const int month = 0, const int day = 0);
-
-  std::string get_log_name();
+private:
+  LogManager();
+  ~LogManager() = default;
+  LogManager(const LogManager&) = delete;
+  LogManager& operator=(const LogManager&) = delete;
 
 private:
   std::mutex m_mutex;
-  std::ofstream m_ofs;
-  std::string m_name;
-  LogLevel m_level;
-  LogLevel m_console_level;
-
-  struct _LogDate {
-    int year;
-    int month;
-    int day;
-  };
-
-  _LogDate m_logdate;
-  int m_line;
-  int m_max_line = MAX_LINE;
-  LogRotate m_rotate;
-
-  std::set<std::string> m_modules;
-
-  std::function<intptr_t()> m_context;
-
-private:
-  void check_params();
-
-  int rotate_by_size();
-  int rotate_by_time(const int year, const int month, const int day);
-  int rename_log();
-
-  template <typename T>
-  int out(const LogLevel console_level, const LogLevel level, T& message);
+  std::map<std::string, Logger::ptr> m_loggers;
+  Logger::ptr m_root;
 };
 
-class Logger {
+// 全局日志对象
+extern Logger::ptr g_log;
+
+/*
+* @brief 初始化全局日志对象
+* @param name 日志对象名称
+* @param console_level 控制台日志级别
+* @param level 文件日志级别
+*/
+void InitLogger(const std::string& name = "system", 
+  LogLevel console_level = LogLevel::WARN, LogLevel level = LogLevel::INFO);
+
+
+// 格式化日志宏定义
+#define LOG_LEVEL(level, fmt, ...) \
+  if(common::g_log && common::g_log->getLevel() <= level) { \
+    char buf[2048]; \
+    snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__); \
+    common::LogEventWrapper(std::make_shared<common::LogEvent>(common::g_log, level, __FILE__, __LINE__, __func__)).getSS() << buf; \
+  }
+
+#define LOG_TRACE(fmt, ...) LOG_LEVEL(common::LogLevel::TRACE, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...) LOG_LEVEL(common::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...)  LOG_LEVEL(common::LogLevel::INFO, fmt, ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...)  LOG_LEVEL(common::LogLevel::WARN, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) LOG_LEVEL(common::LogLevel::ERROR, fmt, ##__VA_ARGS__)
+#define LOG_PANIC(fmt, ...) LOG_LEVEL(common::LogLevel::PANIC, fmt, ##__VA_ARGS__)
+
+// 流式日志宏定义
+#define LOG_LEVEL_STREAM(level) \
+    if(common::g_log && common::g_log->getLevel() <= level) \
+        common::LogEventWrapper(std::make_shared<common::LogEvent>(common::g_log, level, __FILE__, __LINE__, __func__)).getSS()
+
+#define LOG_TRACE_STREAM LOG_LEVEL_STREAM(common::LogLevel::TRACE)
+#define LOG_DEBUG_STREAM LOG_LEVEL_STREAM(common::LogLevel::DEBUG)
+#define LOG_INFO_STREAM  LOG_LEVEL_STREAM(common::LogLevel::INFO)
+#define LOG_WARN_STREAM  LOG_LEVEL_STREAM(common::LogLevel::WARN)
+#define LOG_ERROR_STREAM LOG_LEVEL_STREAM(common::LogLevel::ERROR)
+#define LOG_PANIC_STREAM LOG_LEVEL_STREAM(common::LogLevel::PANIC)
+
+// LogEventWrapper类，用于自动输出日志
+
+class LogEventWrapper {
 public:
-  Logger();
-  virtual ~Logger();
-
-  static int init(const std::string& file, Log** log, LogLevel level = LogLevel::INFO,
-    LogLevel console_level = LogLevel::WARN, LogRotate rotate_type = LogRotate::ROTATE_TIME);
-
-  static int init_default(const std::string& file, Log** log, LogLevel level = LogLevel::INFO,
-    LogLevel console_level = LogLevel::WARN, LogRotate rotate_type = LogRotate::ROTATE_TIME);
-};
-
-#define __FILE_NAME__ (::strrchr(__FILE__, '/') ? ::strrchr(__FILE__, '/') + 1 : __FILE__)
-
-extern Log* g_log;
-
-#define LOG_HEAD(prefix, level) \
-  if (g_log) { \
-    auto now = std::chrono::system_clock::now(); \
-    auto time_t_now = std::chrono::system_clock::to_time_t(now); \
-    std::tm tm_now = *std::localtime(&time_t_now); \
-    auto ms = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()) % 1000000; \
-    std::string head = (boost::format("%04d-%02d-%02d %02d:%02d:%02d.%06d pid:%u tid:%u ctx:%u") \
-      % (tm_now.tm_year + 1900) \
-      % (tm_now.tm_mon + 1) \
-      % tm_now.tm_mday \
-      % tm_now.tm_hour \
-      % tm_now.tm_min \
-      % tm_now.tm_sec \
-      % ms.count() \
-      % getpid() \
-      % std::this_thread::get_id() \
-      % g_log->context_id()).str(); \
-    \
-    g_log->rotate(tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday); \
-    std::string prefix_str = (boost::format("[%s %s %s@%s:%d] >> ") \
-      % head \
-      % LevelToString(level) \
-      % __FUNCTION__ \
-      % __FILE_NAME__ \
-      % (int32_t)__LINE__).str(); \
-    std::strncpy(prefix, prefix_str.c_str(), LOG_HEAD_LENGTH - 1); \
-    prefix[LOG_HEAD_LENGTH - 1] = '\0'; \
-  }
-
-#define LOG_OUTPUT(level, format, ...) \
-  do { \
-    if (g_log && g_log->check_output(level, __FILE_NAME__)) { \
-      char prefix[LOG_HEAD_LENGTH] = { 0 }; \
-      LOG_HEAD(prefix, level); \
-      g_log->output(level, __FILE_NAME__, prefix, format, ##__VA_ARGS__); \
-    } \
-  } while (0)
-
-#define LOG_PANIC(format, ...)  LOG_OUTPUT(LogLevel::PANIC, format, ##__VA_ARGS__)
-#define LOG_ERROR(format, ...)  LOG_OUTPUT(LogLevel::ERROR, format, ##__VA_ARGS__)
-#define LOG_WARN(format, ...)   LOG_OUTPUT(LogLevel::WARN, format, ##__VA_ARGS__)
-#define LOG_INFO(format, ...)   LOG_OUTPUT(LogLevel::INFO, format, ##__VA_ARGS__)
-#define LOG_DEBUG(format, ...)  LOG_OUTPUT(LogLevel::DEBUG, format, ##__VA_ARGS__)
-#define LOG_TRACE(format, ...)  LOG_OUTPUT(LogLevel::TRACE, format, ##__VA_ARGS__)
-
-template <typename T>
-Log& Log::operator<<(T message) {
-  out(m_console_level, m_level, message);
-  return *this;
-}
-
-template <typename T>
-int Log::trace(T message) {
-  return out(LogLevel::TRACE, LogLevel::TRACE, message);
-}
-
-template <typename T>
-int Log::debug(T message) {
-  return out(LogLevel::DEBUG, LogLevel::DEBUG, message);
-}
-
-template <typename T>
-int Log::info(T message) {
-  return out(LogLevel::INFO, LogLevel::INFO, message);
-}
-
-template <typename T>
-int Log::error(T message) {
-  return out(LogLevel::ERROR, LogLevel::ERROR, message);
-}
-
-template <typename T>
-int Log::warn(T message) {
-  return out(LogLevel::WARN, LogLevel::WARN, message);
-}
-
-template <typename T>
-int Log::panic(T message) {
-  return out(LogLevel::PAINC, LogLevel::PAINC, message);
-}
-
-template <typename T>
-int Log::out(const LogLevel console_level, const LogLevel level, T& message) {
-  if (console_level < LogLevel::TRACE || console_level > LogLevel::PAINC 
-    || level < LogLevel::TRACE || level > LogLevel::PAINC) {
-    return -1;
-  }
-
-  char prefix[LOG_HEAD_LENGTH] = {0};
-  LOG_HEAD(prefix, level);
-
-  if (console_level >= LogLevel::TRACE && console_level <= LogLevel::PAINC) {
-    std::cout << LevelToString(console_level) << message << "\n";
-  }
-
-  if (level >= LogLevel::TRACE && level <= LogLevel::PAINC) {
-    m_ofs << prefix << message << "\n";
-    m_ofs.flush();
+  LogEventWrapper(std::shared_ptr<LogEvent> event)
+    : m_event(event) {}
+  
+  ~LogEventWrapper() {
+    m_event->getLogger()->log(m_event->getLevel(), m_event);
   }
   
-  return 0;
-}
+  std::stringstream& getSS() {
+    return m_event->getSS();
+  }
 
+private:
+  std::shared_ptr<LogEvent> m_event;
+};
 } // namespace common

@@ -8,7 +8,7 @@
 #include <ctime>
 #include <stdexcept>
 
-namespace dimdb {
+namespace common {
 
 /**
  * @brief 扩展后的字段类型枚举
@@ -339,4 +339,4 @@ class Value {
   > value_;
 };
 
-} // namespace dimdb
+} // namespace common

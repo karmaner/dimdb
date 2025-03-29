@@ -1,279 +1,309 @@
 #include "log.h"
-#include <cassert>
-#include <cstdarg>
-#include <new>
-#include <filesystem>
+#include <iostream>
+#include <functional>
+#include <sstream>
+#include <cstring>
+#include <cstdio>
+#include <chrono>
+#include <ctime>
+#include <sys/types.h>
 #include <unistd.h>
-#include <boost/algorithm/string.hpp>
+#include <sys/syscall.h>
+#include <filesystem>
+#include <regex>
 
 namespace common {
 
-Log* g_log = nullptr;
+// 全局日志对象定义
+Logger::ptr g_log;
 
-Log::Log(const std::string& filename, const LogLevel level,
-  const LogLevel console_level)
-  : m_name(filename), m_level(level), m_console_level(console_level) {
-
-  m_logdate.year = -1;
-  m_logdate.month = -1;
-  m_logdate.day = -1;
-
-  m_line = 0;
-  m_max_line = MAX_LINE;
-
-  m_rotate = LogRotate::ROTATE_TIME;
-
-  m_context = []() { return 0; };
-
-  check_params();
+/**
+ * @brief 初始化日志系统
+ * @param name 日志名称
+ * @param console_level 控制台日志级别
+ * @param level 文件日志级别
+ */
+void InitLogger(const std::string& name,
+				LogLevel console_level,LogLevel level) {
+	g_log = LogManager::getInstance().getLogger(name);
+	g_log->setLevel(LogLevel::TRACE);
+	
+	// 添加控制台输出，使用简单格式
+	auto console_appender = std::make_shared<StdoutLogAppender>();
+	console_appender->setLevel(console_level);
+	auto console_formatter = std::make_shared<LogFormatter>("[%L] >> %m");
+	console_appender->setFormatter(console_formatter);
+	g_log->addAppender(console_appender);
+	
+	// 添加文件输出，使用详细格式
+	auto file_appender = 
+		std::make_shared<FileLogAppender>("logs/common.log", LogRotate::ROTATE_TIME);
+	file_appender->setLevel(level);
+	auto file_formatter = std::make_shared<LogFormatter>
+					("[%Y-%m-%d %H:%M:%S.%f pid:%P tid:%T ctx:%C %L: %F@%f:%l] >> %m");
+	file_appender->setFormatter(file_formatter);
+	g_log->addAppender(file_appender);
 }
 
-Log::~Log() {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  if (m_ofs.is_open()) {
-    m_ofs.close();
-  }
+// 获取当前线程ID
+static uint64_t GetThreadId() {
+#if defined(__linux__)
+  return syscall(SYS_gettid);
+#else
+  std::stringstream ss;
+  ss << std::this_thread::get_id();
+  uint64_t id;
+  ss >> id;
+  return id;
+#endif
 }
 
-void Log::check_params() {
-  assert(!m_name.empty());
-  assert(m_level >= LogLevel::TRACE && m_level <= LogLevel::PANIC);
-  assert(m_console_level >= LogLevel::TRACE && m_console_level <= LogLevel::PANIC);
-  assert(m_rotate == LogRotate::ROTATE_SIZE || m_rotate == LogRotate::ROTATE_TIME);
-  assert(m_max_line > 0);
-  return;
+// 获取进程ID
+static uint64_t GetPid() {
+	return static_cast<uint64_t>(::getpid());
 }
 
-
-bool Log::check_output(const LogLevel level, const char* module) {
-  return level >= m_console_level ||
-    level >= m_level ||
-    m_modules.find(module) != m_modules.end();
+// 获取上下文ID (这里简单返回0，实际中可根据需求实现)
+static uint64_t GetContextId() {
+	return 0;
 }
 
-int Log::output(const LogLevel level, const char* module, const char* prefix, const char* format, ...) {
-  std::lock_guard<std::mutex> lock(m_mutex);
+// 获取当前时间的字符串表示
+static std::string GetCurrentTimeStr() {
+  auto now = std::chrono::system_clock::now();
+  auto time_point = std::chrono::system_clock::to_time_t(now);
+  auto duration = now.time_since_epoch();
+  auto micros = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000000;
   
-  va_list args;
-  char message[MESSAGE_LENGTH] = {0};
-
-  va_start(args, format);
-  vsnprintf(message, sizeof(message), format, args);
-  va_end(args);
-
-  if (level >= m_console_level) {
-    std::cout << message << "\n";
-  } else if (m_modules.find(module) != m_modules.end()) {
-    std::cout << message << "\n";
-  }
-
-  if (level >= m_level ) {
-    m_ofs << prefix << message << "\n";
-    m_ofs.flush();
-    m_line++;
-  } else if (m_modules.find(module) != m_modules.end()) {
-    m_ofs << prefix << message << "\n";
-    m_ofs.flush();
-    m_line++;
-  }
-  return 0;
+  std::tm tm_time;
+  localtime_r(&time_point, &tm_time);
+  
+  char buffer[32];
+  std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &tm_time);
+  
+  std::string result(buffer);
+  char micro_buffer[10];
+  snprintf(micro_buffer, sizeof(micro_buffer), ".%06ld", micros);
+  result += micro_buffer;
+  
+  return result;
 }
 
-int Log::set_console_level(const LogLevel console_level) {
-  if (console_level < LogLevel::TRACE || console_level > LogLevel::PANIC) {
-    return -1;
-  }
-  m_console_level = console_level;
-  return 0;
+// LogEvent 实现
+LogEvent::LogEvent(std::shared_ptr<Logger> logger, LogLevel level, const char* file, int32_t line, const char* func)
+	: m_logger(logger), 
+		m_level(level),
+		m_file(file),
+		m_line(line),
+		m_func(func),
+		m_pid(GetPid()),
+		m_tid(GetThreadId()),
+		m_ctx([]() { return GetContextId(); }),
+		m_time(GetCurrentTimeStr()) {
+	// 处理文件路径，只保留文件名
+	if (m_file.find_last_of('/') != std::string::npos) {
+		m_file = m_file.substr(m_file.find_last_of('/') + 1);
+	}
 }
 
-LogLevel Log::get_console_level() {
-  return m_console_level;
+// LogFormatter 实现
+LogFormatter::LogFormatter(const std::string& pattern)
+	: m_pattern(pattern) {
 }
 
-int Log::set_log_level(const LogLevel log_level) {
-  if (log_level < LogLevel::TRACE || log_level > LogLevel::PANIC) { 
-    return -1;
-  }
-  m_level = log_level;
-  return 0;
+std::string LogFormatter::format(std::shared_ptr<LogEvent> event) {
+	std::string result = m_pattern;
+	
+	// 替换时间相关的占位符 (%Y-%m-%d %H:%M:%S.%f)
+	std::regex time_regex("%[YmdHMSf]");
+	std::string time_str = event->getTime();
+	result = std::regex_replace(result, std::regex("%Y-%m-%d %H:%M:%S.%f"), time_str);
+	
+	// 替换其他占位符
+	result = std::regex_replace(result, std::regex("%P"), std::to_string(event->getPid()));
+	result = std::regex_replace(result, std::regex("%T"), std::to_string(event->getTid()));
+	result = std::regex_replace(result, std::regex("%C"), std::to_string(event->getCtx()));
+	result = std::regex_replace(result, std::regex("%L"), LogLevelToString(event->getLevel()));
+	result = std::regex_replace(result, std::regex("%F"), event->getFunc());
+	result = std::regex_replace(result, std::regex("%f"), event->getFile());
+	result = std::regex_replace(result, std::regex("%l"), std::to_string(event->getLine()));
+	result = std::regex_replace(result, std::regex("%m"), event->getContent());
+	
+	return result;
 }
 
-LogLevel Log::get_log_level() {
-  return m_level;
+// StdoutLogAppender 实现
+void StdoutLogAppender::log(std::shared_ptr<LogEvent> event) {
+	if (event->getLevel() < m_level) {
+		return;
+	}
+	
+	std::lock_guard<std::mutex> lock(m_mutex);
+	std::cout << m_formatter->format(event) << std::endl;
 }
 
-int Log::set_rotate_type(const LogRotate rotate_type) {
-  if (rotate_type != LogRotate::ROTATE_SIZE && rotate_type != LogRotate::ROTATE_TIME) {
-    return -1;
-  }
-  m_rotate = rotate_type;
-  return 0;
+// FileLogAppender 实现
+FileLogAppender::FileLogAppender(const std::string& filename, LogRotate rotate, size_t max_size)
+	: m_filename(filename), m_rotate(rotate), m_maxSize(max_size) {
+	createNewFile();
+	m_lastRotateTime = std::time(nullptr);
 }
 
-LogRotate Log::get_rotate_type() {
-  return m_rotate;
+bool FileLogAppender::reopen() {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (m_filestream) {
+		m_filestream.close();
+	}
+	
+	m_filestream.open(m_filename, std::ios::app);
+	return m_filestream.is_open();
 }
 
-void Log::set_module(const std::string& modules) {
-  if (modules.empty()) {
-    m_modules.clear();
-    return;
-  }
-  // 分割字符串使用boost分割
-  boost::split(m_modules, modules, boost::is_any_of(","));
+void FileLogAppender::log(std::shared_ptr<LogEvent> event) {
+	if (event->getLevel() < m_level) {
+		return;
+	}
+	
+	std::lock_guard<std::mutex> lock(m_mutex);
+	
+	if (checkRotate()) {
+		createNewFile();
+	}
+	
+	// 检查文件是否打开，如果没有打开则尝试重新打开
+	if (!m_filestream.is_open() && !reopen()) {
+		std::cerr << "Failed to reopen log file: " << m_filename << std::endl;
+		return;
+	}
+	
+	std::string log_line = m_formatter->format(event);
+	m_filestream << log_line << std::endl;
+	m_currentSize += log_line.size() + 1; // +1 for newline
 }
 
-void Log::set_context(std::function<intptr_t()> context) {
-  if (context) {
-    m_context = context;
-  } else {
-    m_context = []() { return 0; };
-  }
+bool FileLogAppender::checkRotate() {
+	if (m_rotate == LogRotate::ROTATE_SIZE) {
+		return m_currentSize >= m_maxSize;
+	} else if (m_rotate == LogRotate::ROTATE_TIME) {
+		time_t now = m_testMode ? m_testTime : std::time(nullptr);
+		std::tm tm_now, tm_last;
+		localtime_r(&now, &tm_now);
+		localtime_r(&m_lastRotateTime, &tm_last);
+		return tm_now.tm_mday != tm_last.tm_mday ||
+						tm_now.tm_mon != tm_last.tm_mon ||
+						tm_now.tm_year != tm_last.tm_year;
+	}
+	return false;
 }
 
-intptr_t Log::context_id() {
-  return m_context();
+void FileLogAppender::createNewFile() {
+	if (m_filestream) {
+		m_filestream.close();
+	}
+	
+	// 首先确保原始目录存在
+	std::filesystem::path original_path(m_filename);
+	if (!std::filesystem::exists(original_path.parent_path())) {
+		std::filesystem::create_directories(original_path.parent_path());
+	}
+	
+	std::string filename = m_filename;
+	if (m_rotate == LogRotate::ROTATE_TIME) {
+		time_t now = m_testMode ? m_testTime : std::time(nullptr);
+		std::tm tm_now;
+		localtime_r(&now, &tm_now);
+		
+		char time_buffer[32];
+		std::strftime(time_buffer, sizeof(time_buffer), ".%Y%m%d", &tm_now);
+		
+		// 直接添加时间戳到文件名末尾
+		filename += time_buffer;
+		
+		m_lastRotateTime = now;
+	} else if (m_rotate == LogRotate::ROTATE_SIZE) {
+		// 按大小轮换时的处理
+		int index = 0;
+		// 查找可用的序号
+		while (std::filesystem::exists(filename + "." + std::to_string(index))) {
+			++index;
+		}
+		
+		filename += "." + std::to_string(index);
+	}
+	
+	m_filestream.open(filename, std::ios::app);
+	if (!m_filestream) {
+		std::cerr << "Failed to open log file: " << filename << std::endl;
+	}
+	
+	m_currentSize = 0;
 }
 
-std::string Log::get_log_name() {
-  return m_name;
+// Logger 实现
+Logger::Logger(const std::string& name)
+	: m_name(name) {
 }
 
-int Log::rotate(const int year, const int month, const int day) {
-  if (m_rotate == LogRotate::ROTATE_SIZE) {
-    return rotate_by_size();
-  } else if (m_rotate == LogRotate::ROTATE_TIME) {
-    return rotate_by_time(year, month, day);
-  }
-  return -1;
+void Logger::log(LogLevel level, const std::shared_ptr<LogEvent>& event) {
+	if (level < m_level) {
+		return;
+	}
+	
+	std::lock_guard<std::mutex> lock(m_mutex);
+	for (auto& appender : m_appenders) {
+		appender->log(event);
+	}
 }
 
-
-Logger::Logger() {
-
+void Logger::addAppender(LogAppender::ptr appender) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (!appender->getFormatter()) {
+		appender->setFormatter(std::make_shared<LogFormatter>());
+	}
+	m_appenders.push_back(appender);
 }
 
-Logger::~Logger() {
-
+void Logger::delAppender(LogAppender::ptr appender) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	for (auto it = m_appenders.begin(); it != m_appenders.end(); ++it) {
+		if (*it == appender) {
+			m_appenders.erase(it);
+			break;
+		}
+	}
 }
 
-int Logger::init(const std::string& file,
-                 Log** log,
-                 LogLevel level, 
-                 LogLevel console_level, 
-                 LogRotate rotate_type) {
-  *log = new (std::nothrow) Log(file, level, console_level);
-  if (*log == nullptr) {
-    std::cerr << "Logger::init() error: new Log failed" << "\n";
-    return -1;
-  }
-  (*log)->set_rotate_type(rotate_type);
-  g_log = *log;
-  return 0;
+void Logger::clearAppenders() {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	m_appenders.clear();
 }
 
-int Logger::init_default(const std::string& file,
-                         Log** log,
-                         LogLevel level, 
-                         LogLevel console_level, 
-                         LogRotate rotate_type) {
-  if (g_log) {
-    LOG_INFO("Logger::init_default() error: g_log already exists");
-    return -1;
-  }
-  return init(file, log, level, console_level, rotate_type);
+// LogManager 实现
+LogManager::LogManager() {
+	m_root = std::make_shared<Logger>();
+	
+	// 默认添加控制台输出
+	auto console_appender = std::make_shared<StdoutLogAppender>();
+	m_root->addAppender(console_appender);
+	
+	m_loggers["root"] = m_root;
 }
 
-#define MAX_LOG_NUM 999
-
-int Log::rename_log() {
-  int log_index = 1;
-  int max_log_index = 0;
-
-  while (log_index < MAX_LOG_NUM) {
-    std::string m_name = m_name + "." + std::to_string(log_index);
-    int rc = access(m_name.c_str(), R_OK);
-    if (rc) {
-      break;
-    }
-
-    max_log_index = log_index;
-    log_index++;
-  }
-
-  auto pad_to_digits = [](int number, uint32_t digits) {
-    std::string result = std::to_string(number);
-    while (result.size() < digits) {
-      result = "0" + result;
-    }
-    return result;
-  };
-
-  if (log_index == MAX_LOG_NUM) {
-    std::string old_log = m_name + "." + pad_to_digits(log_index, 3);
-    remove(old_log.c_str());
-  }
-
-  log_index = max_log_index;
-  while (log_index > 0) {
-    std::string old_log = m_name + "." + pad_to_digits(log_index, 3);
-    std::string new_log = m_name + "." + pad_to_digits(log_index + 1, 3);
-    int rc = rename(old_log.c_str(), new_log.c_str());
-    if (rc) {
-      break;
-    }
-    log_index--;
-  }
-  return 0;
+Logger::ptr LogManager::getLogger(const std::string& name) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	auto it = m_loggers.find(name);
+	if (it != m_loggers.end()) {
+		return it->second;
+	}
+	
+	auto logger = std::make_shared<Logger>(name);
+	// // 默认继承root的输出器
+	// for (auto& appender : m_root->getAppenders()) {
+	// 	logger->addAppender(appender);
+	// }
+	
+	m_loggers[name] = logger;
+	return logger;
 }
-
-int Log::rotate_by_size() {
-  if (m_line < 0) {
-    m_ofs.open(m_name.c_str(), std::ios_base::out | std::ios_base::app);
-    m_line = 0;
-    return 0;
-  } else if (m_line >= 0 && m_line < m_max_line) {
-    return 0;
-  } else {
-    int rc = rename_log();
-    if (rc) {
-      return 0;
-    }
-
-    if (m_ofs.is_open()) {
-      m_ofs.close();
-    }
-
-    m_ofs.open(m_name.c_str(), std::ios_base::out | std::ios_base::app);
-    m_line = 0;
-    return 0;
-  }
-}
-
-int Log::rotate_by_time(const int year, const int month, const int day) {
-  if (m_logdate.year == year && m_logdate.month == month && m_logdate.day == day) {
-    return 0;
-  }
-
-  char date_str[16] = {0};
-  snprintf(date_str, sizeof(date_str), "%04d-%02d-%02d", year, month, day);
-  m_name = m_name + "." + date_str;
-
-  if (m_ofs.is_open()) {
-    m_ofs.close();
-  }
-
-  m_ofs.open(m_name.c_str(), std::ios_base::out | std::ios_base::app);
-  if (m_ofs.good()) {
-    m_line = 0;
-    m_logdate.year = year;
-    m_logdate.month = month;
-    m_logdate.day = day;
-    return 0;
-  }
-  return -1;
-}
-
 
 } // namespace common

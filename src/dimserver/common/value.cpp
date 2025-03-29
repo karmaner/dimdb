@@ -2,7 +2,7 @@
 #include <cstring>
 #include <sstream>
 
-namespace dimdb {
+namespace common {
 
 bool Value::operator==(const Value& other) const {
   if (type_ != other.type_ || is_null_ != other.is_null_) {
@@ -276,4 +276,4 @@ std::string Value::ToString() const {
   return ss.str();
 }
 
-} // namespace dimdb
+} // namespace common

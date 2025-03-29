@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "common/value.h"
 
-namespace dimdb {
+namespace common {
 
 class ValueTest : public ::testing::Test {
 protected:
@@ -330,7 +330,7 @@ TEST_F(ValueTest, TimestampConstructedDateTime) {
   EXPECT_EQ(time_val.GetTime().GetSecond(), 45);
 }
 
-} // namespace dimdb
+} // namespace common
 
 // 主函数
 int main(int argc, char **argv) {
