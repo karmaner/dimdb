@@ -13,38 +13,38 @@ protected:
 TEST_F(ValueTest, BasicConstructionAndGetters) {
   // 测试整数
   Value int_val(42);
-  EXPECT_EQ(int_val.GetType(), FieldType::INTEGER);
-  EXPECT_EQ(int_val.GetInteger(), 42);
-  EXPECT_FALSE(int_val.IsNull());
+  EXPECT_EQ(int_val.get_type(), ArrrType::INTEGER);
+  EXPECT_EQ(int_val.get_integer(), 42);
+  EXPECT_FALSE(int_val.is_null());
 
   // 测试浮点数
   Value float_val(3.14f);
-  EXPECT_EQ(float_val.GetType(), FieldType::FLOAT);
-  EXPECT_FLOAT_EQ(float_val.GetFloat(), 3.14f);
-  EXPECT_FALSE(float_val.IsNull());
+  EXPECT_EQ(float_val.get_type(), ArrrType::FLOAT);
+  EXPECT_FLOAT_EQ(float_val.get_float(), 3.14f);
+  EXPECT_FALSE(float_val.is_null());
 
   // 测试布尔值
   Value bool_val(true);
-  EXPECT_EQ(bool_val.GetType(), FieldType::BOOLEAN);
-  EXPECT_TRUE(bool_val.GetBoolean());
-  EXPECT_FALSE(bool_val.IsNull());
+  EXPECT_EQ(bool_val.get_type(), ArrrType::BOOLEAN);
+  EXPECT_TRUE(bool_val.get_boolean());
+  EXPECT_FALSE(bool_val.is_null());
 
   // 测试字符串
   Value string_val(std::string("hello"));
-  EXPECT_EQ(string_val.GetType(), FieldType::VARCHAR);
-  EXPECT_EQ(string_val.GetString(), "hello");
-  EXPECT_FALSE(string_val.IsNull());
+  EXPECT_EQ(string_val.get_type(), ArrrType::VARCHAR);
+  EXPECT_EQ(string_val.get_string(), "hello");
+  EXPECT_FALSE(string_val.is_null());
 
   // 测试时间戳
   Value timestamp_val(int64_t(1234567890));
-  EXPECT_EQ(timestamp_val.GetType(), FieldType::TIMESTAMP);
-  EXPECT_EQ(timestamp_val.GetTimestamp(), 1234567890);
-  EXPECT_FALSE(timestamp_val.IsNull());
+  EXPECT_EQ(timestamp_val.get_type(), ArrrType::TIMESTAMP);
+  EXPECT_EQ(timestamp_val.get_timestamp(), 1234567890);
+  EXPECT_FALSE(timestamp_val.is_null());
 
   // 测试空值
   Value null_val;
-  EXPECT_EQ(null_val.GetType(), FieldType::INVALID);
-  EXPECT_TRUE(null_val.IsNull());
+  EXPECT_EQ(null_val.get_type(), ArrrType::UNDEFINED);
+  EXPECT_TRUE(null_val.is_null());
 }
 
 // 测试比较操作符
@@ -82,8 +82,8 @@ TEST_F(ValueTest, SerializationDeserialization) {
   {
     Value original(42);
     char buffer[32];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::INTEGER);
+    original.serialize_to(buffer);
+    Value deserialized = Value::deserialize_from(buffer, ArrrType::INTEGER);
     EXPECT_EQ(original, deserialized);
   }
 
@@ -91,17 +91,18 @@ TEST_F(ValueTest, SerializationDeserialization) {
   {
     Value original(3.14f);
     char buffer[32];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::FLOAT);
+    original.serialize_to(buffer);
+    Value deserialized = Value::deserialize_from(buffer, ArrrType::FLOAT);
     EXPECT_EQ(original, deserialized);
   }
 
   // 测试字符串
   {
-    Value original(std::string("hello world"));
+    std::string test_str = "hello world";
+    Value original(static_cast<std::string>(test_str));
     char buffer[64];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::VARCHAR);
+    original.serialize_to(buffer);
+    Value deserialized = Value::deserialize_from(buffer, ArrrType::VARCHAR);
     EXPECT_EQ(original, deserialized);
   }
 
@@ -109,9 +110,9 @@ TEST_F(ValueTest, SerializationDeserialization) {
   {
     Value original;
     char buffer[32];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::INVALID);
-    EXPECT_EQ(original.IsNull(), deserialized.IsNull());
+    original.serialize_to(buffer);
+    Value deserialized = Value::deserialize_from(buffer, ArrrType::UNDEFINED);
+    EXPECT_EQ(original.is_null(), deserialized.is_null());
   }
 }
 
@@ -119,41 +120,41 @@ TEST_F(ValueTest, SerializationDeserialization) {
 TEST_F(ValueTest, SerializedSize) {
   // 测试整数
   Value int_val(42);
-  EXPECT_EQ(int_val.GetSerializedSize(), 
-            sizeof(FieldType) + sizeof(bool) + sizeof(int32_t));
+  EXPECT_EQ(int_val.get_serialized_size(), 
+            sizeof(ArrrType) + sizeof(bool) + sizeof(int32_t));
 
   // 测试字符串
   std::string test_str = "hello world";
-  Value string_val(test_str);
-  EXPECT_EQ(string_val.GetSerializedSize(), 
-            sizeof(FieldType) + sizeof(bool) + sizeof(uint32_t) + test_str.length());
+  Value string_val(static_cast<std::string>(test_str));
+  EXPECT_EQ(string_val.get_serialized_size(), 
+            sizeof(ArrrType) + sizeof(bool) + sizeof(uint32_t) + test_str.length());
 
   // 测试空值
   Value null_val;
-  EXPECT_EQ(null_val.GetSerializedSize(), sizeof(FieldType) + sizeof(bool));
+  EXPECT_EQ(null_val.get_serialized_size(), sizeof(ArrrType) + sizeof(bool));
 }
 
-// 测试ToString方法
+// 测试to_string方法
 TEST_F(ValueTest, ToString) {
   // 测试整数
   Value int_val(42);
-  EXPECT_EQ(int_val.ToString(), "42");
+  EXPECT_EQ(int_val.to_string(), "42");
 
   // 测试浮点数
   Value float_val(3.14f);
-  EXPECT_EQ(float_val.ToString(), "3.14");
+  EXPECT_EQ(float_val.to_string(), "3.14");
 
   // 测试布尔值
   Value bool_val(true);
-  EXPECT_EQ(bool_val.ToString(), "true");
+  EXPECT_EQ(bool_val.to_string(), "true");
 
   // 测试字符串
   Value string_val(std::string("hello"));
-  EXPECT_EQ(string_val.ToString(), "hello");
+  EXPECT_EQ(string_val.to_string(), "hello");
 
   // 测试空值
   Value null_val;
-  EXPECT_EQ(null_val.ToString(), "NULL");
+  EXPECT_EQ(null_val.to_string(), "NULL");
 }
 
 // 测试异常情况
@@ -161,173 +162,67 @@ TEST_F(ValueTest, ExceptionCases) {
   // 测试类型不匹配的反序列化
   Value int_val(42);
   char buffer[32];
-  int_val.SerializeTo(buffer);
-  EXPECT_THROW(Value::DeserializeFrom(buffer, FieldType::VARCHAR), std::runtime_error);
+  int_val.serialize_to(buffer);
+  EXPECT_THROW(Value::deserialize_from(buffer, ArrrType::VARCHAR), std::runtime_error);
 
   // 测试获取错误类型的值
-  EXPECT_THROW(int_val.GetString(), std::bad_variant_access);
-  EXPECT_THROW(int_val.GetFloat(), std::bad_variant_access);
+  EXPECT_THROW(int_val.get_string(), std::bad_variant_access);
+  EXPECT_THROW(int_val.get_float(), std::bad_variant_access);
 }
 
-// 测试新增类型的构造和获取
-TEST_F(ValueTest, ExtendedTypesConstructionAndGetters) {
-  // 测试定长字符串
+// 测试定长字符串类型
+TEST_F(ValueTest, CharStringType) {
+  // 测试定长字符串构造和获取
   CharString char_str("test", 10);
   Value char_val(char_str);
-  EXPECT_EQ(char_val.GetType(), FieldType::CHAR);
-  EXPECT_EQ(char_val.GetChar().size(), 10);
-  EXPECT_EQ(char_val.GetChar().ToString(), "test      "); // 应该有6个空格填充
+  EXPECT_EQ(char_val.get_type(), ArrrType::CHAR);
+  EXPECT_EQ(char_val.get_char().size(), 10);
+  EXPECT_EQ(char_val.get_char().to_string(), "test      "); // 应该有6个空格填充
 
-  // 测试日期
-  Date date(2024, 3, 3);
-  Value date_val(date);
-  EXPECT_EQ(date_val.GetType(), FieldType::DATE);
-  EXPECT_EQ(date_val.GetDate().GetYear(), 2024);
-  EXPECT_EQ(date_val.GetDate().GetMonth(), 3);
-  EXPECT_EQ(date_val.GetDate().GetDay(), 3);
-
-  // 测试时间
-  Time time(14, 30, 45);
-  Value time_val(time);
-  EXPECT_EQ(time_val.GetType(), FieldType::TIME);
-  EXPECT_EQ(time_val.GetTime().GetHour(), 14);
-  EXPECT_EQ(time_val.GetTime().GetMinute(), 30);
-  EXPECT_EQ(time_val.GetTime().GetSecond(), 45);
-}
-
-// 测试新增类型的比较操作
-TEST_F(ValueTest, ExtendedTypesComparison) {
   // 测试定长字符串比较
   Value char1(CharString("abc", 5));
   Value char2(CharString("def", 5));
   EXPECT_TRUE(char1 < char2);
   EXPECT_FALSE(char1 == char2);
 
-  // 测试日期比较
-  Value date1(Date(2024, 3, 3));
-  Value date2(Date(2024, 3, 4));
-  EXPECT_TRUE(date1 < date2);
-  EXPECT_FALSE(date1 >= date2);
-
-  // 测试时间比较
-  Value time1(Time(14, 30, 0));
-  Value time2(Time(14, 30, 1));
-  EXPECT_TRUE(time1 < time2);
-  EXPECT_FALSE(time1 == time2);
-}
-
-// 测试新增类型的序列化和反序列化
-TEST_F(ValueTest, ExtendedTypesSerializationDeserialization) {
-  // 测试定长字符串
+  // 测试定长字符串序列化和反序列化
   {
     Value original(CharString("test", 10));
     char buffer[64];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::CHAR);
+    original.serialize_to(buffer);
+    Value deserialized = Value::deserialize_from(buffer, ArrrType::CHAR);
     EXPECT_EQ(original, deserialized);
-    EXPECT_EQ(original.GetChar().ToString(), deserialized.GetChar().ToString());
+    EXPECT_EQ(original.get_char().to_string(), deserialized.get_char().to_string());
   }
 
-  // 测试日期
+  // 测试定长字符串序列化大小
+  EXPECT_EQ(char_val.get_serialized_size(),
+            sizeof(ArrrType) + sizeof(bool) + sizeof(uint32_t) + 10);
+
+  // 测试定长字符串to_string
+  EXPECT_EQ(char_val.to_string(), "test      ");
+}
+
+// 测试时间戳相关功能
+TEST_F(ValueTest, TimestampFunctionality) {
+  // 测试从时间戳构造
+  int64_t timestamp = 1709467845; // 2024-03-03 14:30:45
+  Value timestamp_val(timestamp);
+  EXPECT_EQ(timestamp_val.get_timestamp(), timestamp);
+
+  // 测试时间戳序列化和反序列化
   {
-    Value original(Date(2024, 3, 3));
     char buffer[32];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::DATE);
-    EXPECT_EQ(original, deserialized);
-    EXPECT_EQ(original.GetDate().ToString(), deserialized.GetDate().ToString());
+    timestamp_val.serialize_to(buffer);
+    Value deserialized = Value::deserialize_from(buffer, ArrrType::TIMESTAMP);
+    EXPECT_EQ(timestamp_val, deserialized);
   }
 
-  // 测试时间
-  {
-    Value original(Time(14, 30, 45));
-    char buffer[32];
-    original.SerializeTo(buffer);
-    Value deserialized = Value::DeserializeFrom(buffer, FieldType::TIME);
-    EXPECT_EQ(original, deserialized);
-    EXPECT_EQ(original.GetTime().ToString(), deserialized.GetTime().ToString());
-  }
-}
-
-// 测试新增类型的序列化大小计算
-TEST_F(ValueTest, ExtendedTypesSerializedSize) {
-  // 测试定长字符串
-  CharString char_str("test", 10);
-  Value char_val(char_str);
-  EXPECT_EQ(char_val.GetSerializedSize(),
-            sizeof(FieldType) + sizeof(bool) + sizeof(uint32_t) + 10);
-
-  // 测试日期
-  Value date_val(Date(2024, 3, 3));
-  EXPECT_EQ(date_val.GetSerializedSize(),
-            sizeof(FieldType) + sizeof(bool) + sizeof(int16_t) + 2 * sizeof(uint8_t));
-
-  // 测试时间
-  Value time_val(Time(14, 30, 45));
-  EXPECT_EQ(time_val.GetSerializedSize(),
-            sizeof(FieldType) + sizeof(bool) + 3 * sizeof(uint8_t));
-}
-
-// 测试新增类型的ToString方法
-TEST_F(ValueTest, ExtendedTypesToString) {
-  // 测试定长字符串
-  Value char_val(CharString("test", 10));
-  EXPECT_EQ(char_val.ToString(), "test      ");
-
-  // 测试日期
-  Value date_val(Date(2024, 3, 3));
-  EXPECT_EQ(date_val.ToString(), "2024-03-03");
-
-  // 测试时间
-  Value time_val(Time(14, 30, 45));
-  EXPECT_EQ(time_val.ToString(), "14:30:45");
-}
-
-// 测试新增类型的异常情况
-TEST_F(ValueTest, ExtendedTypesExceptionCases) {
-  // 测试无效的日期
-  EXPECT_THROW(Date("invalid-date"), std::invalid_argument);
-  
-  // 测试无效的时间
-  EXPECT_THROW(Time("invalid-time"), std::invalid_argument);
-
-  // 测试类型不匹配
-  Value char_val(CharString("test", 10));
-  EXPECT_THROW(char_val.GetDate(), std::bad_variant_access);
-  EXPECT_THROW(char_val.GetTime(), std::bad_variant_access);
-}
-
-// 测试字符串构造的日期和时间
-TEST_F(ValueTest, StringConstructedDateTime) {
-  // 测试从字符串构造日期
-  Date date("2024-03-03");
-  Value date_val(date);
-  EXPECT_EQ(date_val.GetDate().ToString(), "2024-03-03");
-
-  // 测试从字符串构造时间
-  Time time("14:30:45");
-  Value time_val(time);
-  EXPECT_EQ(time_val.GetTime().ToString(), "14:30:45");
-}
-
-// 测试时间戳构造的日期和时间
-TEST_F(ValueTest, TimestampConstructedDateTime) {
-  // 使用固定的时间戳进行测试
-  time_t timestamp = 1709467845; // 2024-03-03 14:30:45
-
-  // 测试从时间戳构造日期
-  Date date(timestamp);
-  Value date_val(date);
-  EXPECT_EQ(date_val.GetDate().GetYear(), 2024);
-  EXPECT_EQ(date_val.GetDate().GetMonth(), 3);
-  EXPECT_EQ(date_val.GetDate().GetDay(), 3);
-
-  // 测试从时间戳构造时间
-  Time time(timestamp);
-  Value time_val(time);
-  EXPECT_EQ(time_val.GetTime().GetHour(), 20);
-  EXPECT_EQ(time_val.GetTime().GetMinute(), 10);
-  EXPECT_EQ(time_val.GetTime().GetSecond(), 45);
+  // 测试时间戳比较
+  Value timestamp1(1709467845);
+  Value timestamp2(1709467846);
+  EXPECT_TRUE(timestamp1 < timestamp2);
+  EXPECT_FALSE(timestamp1 == timestamp2);
 }
 
 } // namespace common

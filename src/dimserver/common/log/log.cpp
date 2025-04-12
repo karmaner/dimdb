@@ -11,6 +11,7 @@
 #include <sys/syscall.h>
 #include <filesystem>
 #include <regex>
+#include <execinfo.h>
 
 namespace common {
 
@@ -306,4 +307,28 @@ Logger::ptr LogManager::getLogger(const std::string& name) {
 	return logger;
 }
 
+
+// 获取当前线程的调用栈
+std::string stacktrace() {
+  void* trace[16];
+  int32_t size = backtrace(trace, sizeof(trace) / sizeof(trace[0]));
+
+	char** symbols = nullptr;
+#ifdef SYMBOLS_SUPPORT
+  symbols = backtrace_symbols(trace, size);
+#endif
+
+  std::ostringstream result;
+	if (symbols) {
+		for (int32_t i = 0; i < size; i++) {
+			result << symbols[i] << "\n";
+		}
+		free(symbols);  // 释放符号信息
+	} else {
+		for (int32_t i = 0; i < size; i++) {
+			result << "0x" << std::hex << reinterpret_cast<uintptr_t>(trace[i]) << "\n";
+		}
+	}
+  return result.str();
+}
 } // namespace common

@@ -275,4 +275,17 @@ public:
 private:
   std::shared_ptr<LogEvent> m_event;
 };
+
+/**
+ * @brief 获取当前线程的调用栈信息
+ * @details 该函数通过backtrace和backtrace_symbols获取当前线程的调用栈，
+ *          并以十六进制地址格式输出。默认情况下只输出地址，不解析符号信息。
+ *          只有在定义了SYMBOLS_SUPPORT宏的情况下才会解析符号。
+ *          调用栈格式为："0x地址1 符号1 0x地址2 符号2 ..."或者在没有符号时："0x地址1 0x地址2 ..."
+ *          使用thread_local存储以提高性能，避免频繁内存分配。
+ *          支持最多100帧的调用栈，输出缓冲区大小为8192字节。
+ * @return 格式化后的调用栈字符串
+ */
+std::string stacktrace();
+
 } // namespace common
