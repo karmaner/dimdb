@@ -25,7 +25,7 @@ Logger::ptr g_log;
  * @param level 文件日志级别
  */
 void InitLogger(const std::string& name,
-				LogLevel console_level,LogLevel level) {
+		LogLevel console_level,LogLevel level) {
 	g_log = LogManager::getInstance().getLogger(name);
 	g_log->setLevel(LogLevel::TRACE);
 	

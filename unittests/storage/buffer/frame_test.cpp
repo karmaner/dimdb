@@ -29,7 +29,7 @@ TEST_F(FrameTest, FrameIdTest) {
 // 测试页面基本操作
 TEST_F(FrameTest, PageOperationsTest) {
   // 测试页面访问
-  Page& page = frame->get_page();
+  Page& page = frame->page();
   EXPECT_EQ(page.header.page_num, BP_INVALID_PAGE_NUM);
   
   // 测试数据访问
@@ -43,19 +43,19 @@ TEST_F(FrameTest, PageOperationsTest) {
 
 // 测试引用计数操作
 TEST_F(FrameTest, PinUnpinTest) {
-  EXPECT_EQ(frame->get_pin_count(), 0);
+  EXPECT_EQ(frame->pin_count(), 0);
   
   frame->pin();
-  EXPECT_EQ(frame->get_pin_count(), 1);
+  EXPECT_EQ(frame->pin_count(), 1);
   
   frame->pin();
-  EXPECT_EQ(frame->get_pin_count(), 2);
+  EXPECT_EQ(frame->pin_count(), 2);
   
   frame->unpin();
-  EXPECT_EQ(frame->get_pin_count(), 1);
+  EXPECT_EQ(frame->pin_count(), 1);
   
   frame->unpin();
-  EXPECT_EQ(frame->get_pin_count(), 0);
+  EXPECT_EQ(frame->pin_count(), 0);
 }
 
 // 测试脏页标记
@@ -79,22 +79,22 @@ TEST_F(FrameTest, BufferPoolIdTest) {
 
 // 测试LSN操作
 TEST_F(FrameTest, LSNTest) {
-  EXPECT_EQ(frame->get_lsn(), 0);
+  EXPECT_EQ(frame->lsn(), 0);
   
   LSN test_lsn = 12345;
   frame->set_lsn(test_lsn);
-  EXPECT_EQ(frame->get_lsn(), test_lsn);
+  EXPECT_EQ(frame->lsn(), test_lsn);
 }
 
 // 测试页面类型操作
 TEST_F(FrameTest, PageTypeTest) {
-  EXPECT_EQ(frame->get_page_type(), PageType::UNKNOWN_PAGE);
+  EXPECT_EQ(frame->page_type(), PageType::UNKNOWN_PAGE);
   
   frame->set_page_type(PageType::DATA_PAGE);
-  EXPECT_EQ(frame->get_page_type(), PageType::DATA_PAGE);
+  EXPECT_EQ(frame->page_type(), PageType::DATA_PAGE);
   
   frame->set_page_type(PageType::INDEX_PAGE);
-  EXPECT_EQ(frame->get_page_type(), PageType::INDEX_PAGE);
+  EXPECT_EQ(frame->page_type(), PageType::INDEX_PAGE);
 }
 
 // 测试校验和操作
@@ -131,7 +131,7 @@ TEST_F(FrameTest, ConcurrentAccessTest) {
     thread.join();
   }
   
-  EXPECT_EQ(frame->get_pin_count(), 0);
+  EXPECT_EQ(frame->pin_count(), 0);
 }
 
 // 测试FrameId比较操作

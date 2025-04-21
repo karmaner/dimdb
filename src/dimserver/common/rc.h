@@ -51,7 +51,11 @@
     RC_DEF(IOERR_READ, -710)                \
     RC_DEF(IOERR_WRITE, -711)               \
     RC_DEF(IOERR_SEEK, -712)                \
-    RC_DEF(MESSAGE_INVAID, -750)         
+    RC_DEF(MESSAGE_INVAID, -750)            \
+    RC_DEF(NO_MEM_POOL, -760)               \
+    RC_DEF(BUFFERPOOL_INVALID_PAGE_NUM, -800)\
+    RC_DEF(BUFFERPOOL_OPENED, -810)         \
+    RC_DEF(SCHEMA_DB_EXIST, -820)
 
 // 定义枚举类
 enum class RC {

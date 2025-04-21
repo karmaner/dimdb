@@ -24,6 +24,7 @@ struct FrameId {
   bool operator!=(const FrameId& other) const;
   bool operator<(const FrameId& other) const;
   bool is_valid() const;
+  size_t hash() const;
   std::string to_string() const;
 };
 
@@ -41,26 +42,36 @@ public:
    * @details 在 MemPoolSimple 分配和释放一个Frame对象时，不会调用构造函数和析构函数，
    * 而是调用reinit和reset。
    */
-  void reinit() {}
-  void reset() {}
+  void reinit() {
+    pin_count_ = 0;
+    acc_time_ = 0;
+    frame_id_ = FrameId();
+    page_.init();
+  }
 
-  Page& page() { return m_page; }
-  void clear_page() { memset(&m_page, 0, sizeof(m_page)); }
+  void reset() {
+    pin_count_ = 0;
+    acc_time_ = 0;
+    frame_id_ = FrameId();
+    page_.init();
+  }
+
+  void clear_page() { memset(&page_, 0, sizeof(page_)); }
 
   // 获取帧ID
-  const FrameId& get_frame_id() const;
+  const FrameId& frame_id() const;
 
-  char* data() { return m_page.data; }
+  char* data() { return page_.data; }
   
   // 设置帧ID
   void set_frame_id(const FrameId& frame_id);
   
   // 获取页面
-  Page& get_page();
-  const Page& get_page() const;
+  Page& page();
+  const Page& page() const;
   
   // 获取页号
-  PageNum get_page_num() const;
+  PageNum page_num() const;
   
   // 增加引用计数
   void pin();
@@ -69,7 +80,9 @@ public:
   void unpin();
   
   // 获取引用计数
-  int get_pin_count() const;
+  int pin_count() const;
+
+  bool can_purge() const { return pin_count_.load() == 0; }
 
   void access();
   
@@ -81,22 +94,24 @@ public:
   int buffer_pool_id() const;
   void set_buffer_pool_id(int id);
 
-  LSN get_lsn() const;
+  LSN lsn() const;
   void set_lsn(LSN lsn);
 
-  PageType get_page_type() const;
+  void set_page_num(PageNum page_num);
+  PageType page_type() const;
   void set_page_type(PageType type);
 
   void calc_checksum();
   bool verify_checksum() const;
   
   std::string to_string() const;
+
 private:
-  std::atomic<int> m_pin_count{0};       // 引用计数
-  unsigned long m_acc_time = 0;          // 最后访问时间（用于LRU替换）
-  FrameId m_frame_id;                    // 帧ID
-  Page m_page;                           // 页面数据
-  std::mutex m_mutex;                    // 互斥锁，用于并发控制
+  std::atomic<int> pin_count_{0};       // 引用计数
+  unsigned long acc_time_ = 0;          // 最后访问时间（用于LRU替换）
+  FrameId frame_id_;                    // 帧ID
+  Page page_;                           // 页面数据
+  std::mutex mutex_;                    // 互斥锁，用于并发控制
 };
 
 } // namespace storage

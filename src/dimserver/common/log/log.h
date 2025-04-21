@@ -288,4 +288,30 @@ private:
  */
 std::string stacktrace();
 
+#ifndef ASSERT
+#ifdef DEBUG
+#define ASSERT(expression, description, ...) \
+  do {                                       \
+    if (!(expression)) {                     \
+      LOG_PANIC(description, ##__VA_ARGS__); \
+      assert(expression);                    \
+    }                                        \
+  } while (0)
+#else // DEBUG
+#define ASSERT(expression, description, ...) \
+  do {                                       \
+    (void)(expression);                      \
+  } while (0)
+#endif // DEBUG
+
+#endif // ASSERT
+
+#ifndef TRACE
+#ifdef DEBUG
+#define TRACE(format, ...) LOG_TRACE(format, ##__VA_ARGS__)
+#else // DEBUG
+#define TRACE(...)
+#endif // DEBUG
+#endif // TRACE
+
 } // namespace common
